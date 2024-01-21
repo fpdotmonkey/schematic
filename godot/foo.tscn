@@ -1,0 +1,5 @@
+[gd_scene format=3 uid="uid://cq05vmn3ttm80"]
+
+[node name="Circuit" type="Circuit"]
+junction_click_size = 4
+junction_highlight = Color(1, 1, 0, 1)
