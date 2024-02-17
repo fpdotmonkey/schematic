@@ -553,6 +553,7 @@ mod tests {
         let j1 = embedding.add_junction(Vector2i::new(0, 10));
         let j2 = embedding.add_junction(Vector2i::new(-10, 0));
         let j3 = embedding.add_junction(Vector2i::new(0, -10));
+        embedding.add_connection(j0, j1); // ensure the next connections are the same voltage
         embedding.add_connection(j0, j2);
         embedding.add_connection(j1, j3);
         assert_eq!(
@@ -573,6 +574,11 @@ mod tests {
         assert_eq!(
             embedding.lines().iter().collect::<HashSet<_>>(),
             vec![
+                vec![
+                    Vector2i::new(10, 0),
+                    Vector2i::new(10, 10),
+                    Vector2i::new(0, 10)
+                ],
                 vec![Vector2i::new(10, 0), Vector2i::new(0, 0)],
                 vec![Vector2i::new(0, 10), Vector2i::new(0, 0)],
                 vec![Vector2i::new(-10, 0), Vector2i::new(0, 0)],
@@ -594,6 +600,7 @@ mod tests {
         let j1 = embedding.add_junction(Vector2i::new(782, 342));
         let j2 = embedding.add_junction(Vector2i::new(534, 153));
         let j3 = embedding.add_junction(Vector2i::new(541, 514));
+        embedding.add_connection(j1, j2); // voltage connection
         embedding.add_connection(j0, j1);
         embedding.add_connection(j2, j3);
         assert_eq!(
@@ -608,6 +615,8 @@ mod tests {
                 Vector2i::new(782, 342),
                 Vector2i::new(534, 153),
                 Vector2i::new(541, 514),
+                Vector2i::new(782, 321), // intersection w/ voltage connection
+                Vector2i::new(541, 153), // intersection w/ voltage connection
                 Vector2i::new(541, 321),
             ]
         );
@@ -622,6 +631,8 @@ mod tests {
         let j3 = embedding.add_junction(Vector2i::new(10, -10));
         let j4 = embedding.add_junction(Vector2i::new(-10, 0));
         let j5 = embedding.add_junction(Vector2i::new(20, 0));
+        embedding.add_connection(j1, j2); // voltage connection
+        embedding.add_connection(j2, j5); // voltage connection
         embedding.add_connection(j0, j1);
         embedding.add_connection(j2, j3);
         embedding.add_connection(j4, j5); // This is like the horizontal on an H
@@ -649,6 +660,12 @@ mod tests {
         assert_eq!(
             embedding.lines().iter().collect::<HashSet<_>>(),
             vec![
+                vec![Vector2i::new(0, 10), Vector2i::new(10, 10)],
+                vec![
+                    Vector2i::new(10, 10),
+                    Vector2i::new(20, 10),
+                    Vector2i::new(20, 0)
+                ],
                 vec![Vector2i::new(0, -10), Vector2i::new(0, 0)],
                 vec![Vector2i::new(0, 10), Vector2i::new(0, 0)],
                 vec![Vector2i::new(-10, 0), Vector2i::new(0, 0)],
