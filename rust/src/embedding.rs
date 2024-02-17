@@ -443,18 +443,18 @@ mod tests {
     #[test]
     fn lines_between_single_axis_unoriented_junctions() {
         let mut embedding: Embedding = Default::default();
-        let k0 = embedding.add_junction(Vector2i::new(0, 0));
-        let k1 = embedding.add_junction(Vector2i::new(10, 0));
-        let k2 = embedding.add_junction(Vector2i::new(0, 10));
-        let k3 = embedding.add_junction(Vector2i::new(-10, 0));
-        let k4 = embedding.add_junction(Vector2i::new(0, -10));
-        embedding.add_connection(k0, k1);
-        embedding.add_connection(k0, k2);
-        embedding.add_connection(k0, k3);
-        embedding.add_connection(k0, k4);
-        embedding.add_connection(k0, k0); // self connections should be rejected
-        embedding.add_connection(k0, k1); // duplicates should be rejected
-        embedding.add_connection(k2, k0); // reverse order dupe should be rejected
+        let j0 = embedding.add_junction(Vector2i::new(0, 0));
+        let j1 = embedding.add_junction(Vector2i::new(10, 0));
+        let j2 = embedding.add_junction(Vector2i::new(0, 10));
+        let j3 = embedding.add_junction(Vector2i::new(-10, 0));
+        let j4 = embedding.add_junction(Vector2i::new(0, -10));
+        embedding.add_connection(j0, j1);
+        embedding.add_connection(j0, j2);
+        embedding.add_connection(j0, j3);
+        embedding.add_connection(j0, j4);
+        embedding.add_connection(j0, j0); // self connections should be rejected
+        embedding.add_connection(j0, j1); // duplicates should be rejected
+        embedding.add_connection(j2, j0); // reverse order dupe should be rejected
 
         assert_eq!(
             embedding
@@ -485,22 +485,22 @@ mod tests {
     #[test]
     fn lines_between_two_axis_unoriented_junctions() {
         let mut embedding: Embedding = Default::default();
-        let k0 = embedding.add_junction(Vector2i::new(0, 0));
-        let k1 = embedding.add_junction(Vector2i::new(10, 10));
-        let k2 = embedding.add_junction(Vector2i::new(-10, 10));
-        let k3 = embedding.add_junction(Vector2i::new(-10, -10));
-        let k4 = embedding.add_junction(Vector2i::new(10, -10));
+        let j0 = embedding.add_junction(Vector2i::new(0, 0));
+        let j1 = embedding.add_junction(Vector2i::new(10, 10));
+        let j2 = embedding.add_junction(Vector2i::new(-10, 10));
+        let j3 = embedding.add_junction(Vector2i::new(-10, -10));
+        let j4 = embedding.add_junction(Vector2i::new(10, -10));
 
         let mut forward_embedding = embedding.clone();
-        forward_embedding.add_connection(k0, k1);
-        forward_embedding.add_connection(k0, k2);
-        forward_embedding.add_connection(k0, k3);
-        forward_embedding.add_connection(k0, k4);
+        forward_embedding.add_connection(j0, j1);
+        forward_embedding.add_connection(j0, j2);
+        forward_embedding.add_connection(j0, j3);
+        forward_embedding.add_connection(j0, j4);
         let mut backward_embedding = embedding;
-        backward_embedding.add_connection(k1, k0);
-        backward_embedding.add_connection(k2, k0);
-        backward_embedding.add_connection(k3, k0);
-        backward_embedding.add_connection(k4, k0);
+        backward_embedding.add_connection(j1, j0);
+        backward_embedding.add_connection(j2, j0);
+        backward_embedding.add_connection(j3, j0);
+        backward_embedding.add_connection(j4, j0);
         // the embedding should not change based on the direction the
         // connections are made
         assert_eq!(forward_embedding, backward_embedding);
@@ -549,12 +549,12 @@ mod tests {
     #[test]
     fn perpendicular_intersection() {
         let mut embedding: Embedding = Default::default();
-        let k0 = embedding.add_junction(Vector2i::new(10, 0)); // no origin!
-        let k1 = embedding.add_junction(Vector2i::new(0, 10));
-        let k2 = embedding.add_junction(Vector2i::new(-10, 0));
-        let k3 = embedding.add_junction(Vector2i::new(0, -10));
-        embedding.add_connection(k0, k2);
-        embedding.add_connection(k1, k3);
+        let j0 = embedding.add_junction(Vector2i::new(10, 0)); // no origin!
+        let j1 = embedding.add_junction(Vector2i::new(0, 10));
+        let j2 = embedding.add_junction(Vector2i::new(-10, 0));
+        let j3 = embedding.add_junction(Vector2i::new(0, -10));
+        embedding.add_connection(j0, j2);
+        embedding.add_connection(j1, j3);
         assert_eq!(
             embedding
                 .junctions()
@@ -590,12 +590,12 @@ mod tests {
         // divide-by-zero in a case where I worked out it shouldn't.
         // Turns out I wasn't handling parallel non-colinear cases.
         let mut embedding: Embedding = Default::default();
-        let k0 = embedding.add_junction(Vector2i::new(323, 321));
-        let k1 = embedding.add_junction(Vector2i::new(782, 342));
-        let k2 = embedding.add_junction(Vector2i::new(534, 153));
-        let k3 = embedding.add_junction(Vector2i::new(541, 514));
-        embedding.add_connection(k0, k1);
-        embedding.add_connection(k2, k3);
+        let j0 = embedding.add_junction(Vector2i::new(323, 321));
+        let j1 = embedding.add_junction(Vector2i::new(782, 342));
+        let j2 = embedding.add_junction(Vector2i::new(534, 153));
+        let j3 = embedding.add_junction(Vector2i::new(541, 514));
+        embedding.add_connection(j0, j1);
+        embedding.add_connection(j2, j3);
         assert_eq!(
             embedding
                 .junctions()
@@ -616,15 +616,15 @@ mod tests {
     #[test]
     fn intersection_through_two_lines() {
         let mut embedding: Embedding = Default::default();
-        let k0 = embedding.add_junction(Vector2i::new(0, -10));
-        let k1 = embedding.add_junction(Vector2i::new(0, 10));
-        let k2 = embedding.add_junction(Vector2i::new(10, 10));
-        let k3 = embedding.add_junction(Vector2i::new(10, -10));
-        let k4 = embedding.add_junction(Vector2i::new(-10, 0));
-        let k5 = embedding.add_junction(Vector2i::new(20, 0));
-        embedding.add_connection(k0, k1);
-        embedding.add_connection(k2, k3);
-        embedding.add_connection(k4, k5); // This is like the horizontal on an H
+        let j0 = embedding.add_junction(Vector2i::new(0, -10));
+        let j1 = embedding.add_junction(Vector2i::new(0, 10));
+        let j2 = embedding.add_junction(Vector2i::new(10, 10));
+        let j3 = embedding.add_junction(Vector2i::new(10, -10));
+        let j4 = embedding.add_junction(Vector2i::new(-10, 0));
+        let j5 = embedding.add_junction(Vector2i::new(20, 0));
+        embedding.add_connection(j0, j1);
+        embedding.add_connection(j2, j3);
+        embedding.add_connection(j4, j5); // This is like the horizontal on an H
 
         assert_eq!(
             embedding
