@@ -28,7 +28,7 @@ struct Line {
 }
 
 #[derive(GodotClass)]
-#[class(no_init, base=Sprite2D)]
+#[class(init, base=Sprite2D)]
 struct CircuitJunction {
     key: embedding::JunctionKey,
     click_size: u32,
@@ -37,14 +37,14 @@ struct CircuitJunction {
 }
 
 #[derive(GodotClass)]
-#[class(no_init, base=Line2D)]
+#[class(init, base=Line2D)]
 struct CircuitLine {
     points: Vec<Vector2i>,
     base: Base<Line2D>,
 }
 
 #[derive(GodotClass)]
-#[class(no_init, base=Line2D)]
+#[class(init, base=Line2D)]
 struct CircuitProtoLine {
     start: embedding::JunctionKey,
     end: Vector2i,
