@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use godot::builtin::{
     meta::{ConvertError, FromGodot, GodotConvert, ToGodot},
@@ -21,6 +22,7 @@ pub struct Embedding {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Junction {
     position: Vector2i,
+    voltage: u32,
     kind: (),
 }
 
@@ -31,7 +33,8 @@ slotmap::new_key_type! {
 
 #[derive(Debug, Default, Clone)]
 struct EmbeddingInner {
-    junctions: RefCell<slotmap::SlotMap<JunctionKey, Junction>>,
+    junctions: Rc<RefCell<slotmap::SlotMap<JunctionKey, Junction>>>,
+    next_voltage: u32,
     lines: slotmap::SlotMap<LineKey, Line>,
 }
 
@@ -44,8 +47,7 @@ struct Line {
     start: JunctionKey,
     middle: Option<Vector2i>,
     end: JunctionKey,
-    junctions: RefCell<slotmap::SlotMap<JunctionKey, Junction>>,
-    // points: Vec<Vector2i>,
+    junctions: Rc<RefCell<slotmap::SlotMap<JunctionKey, Junction>>>,
 }
 
 impl GodotConvert for JunctionKey {
@@ -64,7 +66,7 @@ impl FromGodot for JunctionKey {
 
 impl Embedding {
     // A list of all junctions in the circuit
-    pub fn junctions(&self) -> RefCell<slotmap::SlotMap<JunctionKey, Junction>> {
+    pub fn junctions(&self) -> Rc<RefCell<slotmap::SlotMap<JunctionKey, Junction>>> {
         self.inner.junctions()
     }
 
@@ -107,15 +109,20 @@ impl Embedding {
 impl EmbeddingInner {
     /// Add a new unoriented junction at the specified position
     fn add_junction(&mut self, position: Vector2i) -> JunctionKey {
-        let candidate_junction = Junction { position, kind: () };
+        let candidate_junction = Junction {
+            position,
+            voltage: self.next_voltage,
+            kind: (),
+        };
         if let Some((key, _)) = self
             .junctions
             .borrow()
             .iter()
-            .find(|(_, j)| j == &&candidate_junction)
+            .find(|(_, j)| j.position() == candidate_junction.position())
         {
             return key;
         }
+        self.next_voltage += 1;
         self.junctions.borrow_mut().insert(candidate_junction)
     }
 
@@ -132,12 +139,12 @@ impl EmbeddingInner {
         if start == end {
             return;
         }
+        self.set_equal_voltage(start, end);
         let mut line = Line {
             start: std::cmp::min(start, end),
             middle: None,
             end: std::cmp::max(start, end),
             junctions: self.junctions.clone(),
-            // points: &self.points,
         };
 
         if line.start().x != line.end().x && line.start().y != line.end().y {
@@ -155,6 +162,51 @@ impl EmbeddingInner {
         self.lines.insert(line);
     }
 
+    fn set_equal_voltage(&mut self, start: JunctionKey, end: JunctionKey) {
+        // connected junctions will be the same voltage, the minimum of
+        // the subgraph
+        let mut new_voltage = u32::MAX;
+        let mut handled_junctions: HashSet<JunctionKey> = HashSet::default();
+        let mut working_junctions = vec![start, end];
+        while !working_junctions.is_empty() {
+            // see if the voltage should be lower
+            new_voltage = std::cmp::min(
+                new_voltage,
+                working_junctions
+                    .iter()
+                    .map(|&j| self.junctions.borrow()[j].voltage())
+                    .max()
+                    .expect("empty working junctions"),
+            );
+            // add the working junctions to handled
+            for &junction in working_junctions.iter() {
+                handled_junctions.insert(junction);
+            }
+            // get the next set of working junctions
+            working_junctions = working_junctions
+                .iter()
+                .flat_map(|&junction| {
+                    self.lines
+                        .iter()
+                        .filter_map(|(_, line)| {
+                            if line.start == junction {
+                                Some(line.end)
+                            } else if line.end == junction {
+                                Some(line.start)
+                            } else {
+                                None
+                            }
+                        })
+                        .filter(|junction| !handled_junctions.contains(junction))
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+        }
+        for junction in handled_junctions {
+            self.junctions.borrow_mut()[junction].set_voltage(new_voltage);
+        }
+    }
+
     fn handle_intersections(&mut self) {
         let new_junctions = self
             .lines
@@ -165,6 +217,9 @@ impl EmbeddingInner {
                     .iter()
                     .skip(i + 1)
                     .flat_map(|(other_key, other_line)| {
+                        if line.voltage() != other_line.voltage() {
+                            return vec![];
+                        }
                         line.intersect(other_line)
                             .iter()
                             .filter_map(|intersect| match intersect {
@@ -209,7 +264,7 @@ impl EmbeddingInner {
         }
     }
 
-    fn junctions(&self) -> RefCell<slotmap::SlotMap<JunctionKey, Junction>> {
+    fn junctions(&self) -> Rc<RefCell<slotmap::SlotMap<JunctionKey, Junction>>> {
         self.junctions.clone()
     }
 
@@ -242,6 +297,14 @@ impl PartialEq for EmbeddingInner {
 impl Junction {
     pub fn position(&self) -> Vector2i {
         self.position
+    }
+
+    fn voltage(&self) -> u32 {
+        self.voltage
+    }
+
+    fn set_voltage(&mut self, new_voltage: u32) {
+        self.voltage = new_voltage;
     }
 }
 
@@ -294,6 +357,12 @@ impl Line {
         }
         vertices.push(self.end());
         vertices
+    }
+
+    fn voltage(&self) -> u32 {
+        let voltage = self.junctions.borrow()[self.start].voltage();
+        assert_eq!(voltage, self.junctions.borrow()[self.end].voltage());
+        voltage
     }
 }
 
@@ -429,14 +498,16 @@ mod tests {
                 .borrow()
                 .iter()
                 .map(|(_, junction)| junction.position())
-                .collect::<Vec<Vector2i>>(),
+                .collect::<HashSet<_>>(),
             vec![
                 Vector2i::new(0, 0),
                 Vector2i::new(10, 0),
                 Vector2i::new(0, 10),
                 Vector2i::new(-10, 0),
                 Vector2i::new(0, -10),
-            ],
+            ]
+            .into_iter()
+            .collect::<HashSet<_>>()
         )
     }
 
@@ -462,7 +533,7 @@ mod tests {
                 .borrow()
                 .iter()
                 .map(|(_, junction)| junction.position())
-                .collect::<Vec<Vector2i>>(),
+                .collect::<HashSet<_>>(),
             vec![
                 Vector2i::new(0, 0),
                 Vector2i::new(10, 0),
@@ -470,15 +541,19 @@ mod tests {
                 Vector2i::new(-10, 0),
                 Vector2i::new(0, -10),
             ]
+            .into_iter()
+            .collect::<HashSet<_>>()
         );
         assert_eq!(
-            embedding.lines(),
+            embedding.lines().into_iter().collect::<HashSet<_>>(),
             vec![
                 vec![Vector2i::new(0, 0), Vector2i::new(10, 0)],
                 vec![Vector2i::new(0, 0), Vector2i::new(0, 10)],
                 vec![Vector2i::new(0, 0), Vector2i::new(-10, 0)],
                 vec![Vector2i::new(0, 0), Vector2i::new(0, -10)]
             ]
+            .into_iter()
+            .collect::<HashSet<_>>()
         );
     }
 
@@ -510,7 +585,7 @@ mod tests {
                 .borrow()
                 .iter()
                 .map(|(_, junction)| junction.position())
-                .collect::<Vec<Vector2i>>(),
+                .collect::<HashSet<_>>(),
             vec![
                 Vector2i::new(0, 0),
                 Vector2i::new(10, 10),
@@ -518,6 +593,8 @@ mod tests {
                 Vector2i::new(-10, -10),
                 Vector2i::new(10, -10),
             ]
+            .into_iter()
+            .collect::<HashSet<_>>()
         );
         assert_eq!(
             forward_embedding.lines(),
@@ -562,7 +639,7 @@ mod tests {
                 .borrow()
                 .iter()
                 .map(|(_, junction)| junction.position())
-                .collect::<Vec<Vector2i>>(),
+                .collect::<HashSet<_>>(),
             vec![
                 Vector2i::new(10, 0),
                 Vector2i::new(0, 10),
@@ -570,6 +647,8 @@ mod tests {
                 Vector2i::new(0, -10),
                 Vector2i::new(0, 0), // origin!
             ]
+            .into_iter()
+            .collect::<HashSet<_>>()
         );
         assert_eq!(
             embedding.lines().iter().collect::<HashSet<_>>(),
@@ -609,7 +688,7 @@ mod tests {
                 .borrow()
                 .iter()
                 .map(|(_, junction)| junction.position())
-                .collect::<Vec<Vector2i>>(),
+                .collect::<HashSet<_>>(),
             vec![
                 Vector2i::new(323, 321),
                 Vector2i::new(782, 342),
@@ -619,6 +698,8 @@ mod tests {
                 Vector2i::new(541, 153), // intersection w/ voltage connection
                 Vector2i::new(541, 321),
             ]
+            .into_iter()
+            .collect::<HashSet<_>>()
         );
     }
 
@@ -673,6 +754,156 @@ mod tests {
                 vec![Vector2i::new(20, 0), Vector2i::new(10, 0)],
                 vec![Vector2i::new(10, 10), Vector2i::new(10, 0)],
                 vec![Vector2i::new(10, -10), Vector2i::new(10, 0)],
+            ]
+            .iter()
+            .collect::<HashSet<_>>()
+        );
+    }
+
+    #[test]
+    fn different_voltage_lines_dont_intersect() {
+        // this is the same as perpendicular_intersection(), but without
+        // the voltage connection
+        let mut embedding: Embedding = Default::default();
+        let j0 = embedding.add_junction(Vector2i::new(10, 0)); // no origin!
+        let j1 = embedding.add_junction(Vector2i::new(0, 10));
+        let j2 = embedding.add_junction(Vector2i::new(-10, 0));
+        let j3 = embedding.add_junction(Vector2i::new(0, -10));
+        // the connections don't have any junctions in common, so different voltage
+        embedding.add_connection(j0, j2);
+        embedding.add_connection(j1, j3);
+        assert_eq!(
+            embedding
+                .junctions()
+                .borrow()
+                .iter()
+                .map(|(_, junction)| junction.position())
+                .collect::<HashSet<_>>(),
+            vec![
+                Vector2i::new(10, 0),
+                Vector2i::new(0, 10),
+                Vector2i::new(-10, 0),
+                Vector2i::new(0, -10), // still no origin!
+            ]
+            .into_iter()
+            .collect::<HashSet<_>>()
+        );
+        assert_eq!(
+            embedding.lines().iter().collect::<HashSet<_>>(),
+            vec![
+                vec![Vector2i::new(10, 0), Vector2i::new(-10, 0)],
+                vec![Vector2i::new(0, 10), Vector2i::new(0, -10)],
+            ]
+            .iter()
+            .collect::<HashSet<_>>()
+        );
+    }
+
+    #[test]
+    fn connections_after_bridging_intersect() {
+        let mut embedding: Embedding = Default::default();
+        let test0 = embedding.add_junction(Vector2i::new(-20, 0));
+        let j0 = embedding.add_junction(Vector2i::new(-20, 10));
+        let bridge0 = embedding.add_junction(Vector2i::new(-10, 10));
+        let j1 = embedding.add_junction(Vector2i::new(-10, -10));
+        let test1 = embedding.add_junction(Vector2i::new(20, 0));
+        let j2 = embedding.add_junction(Vector2i::new(20, 10));
+        let bridge1 = embedding.add_junction(Vector2i::new(10, 10));
+        let j3 = embedding.add_junction(Vector2i::new(10, -10));
+        embedding.add_connection(test0, j0); // left side U
+        embedding.add_connection(j0, bridge0);
+        embedding.add_connection(bridge0, j1);
+        embedding.add_connection(test1, j2); // right side U
+        embedding.add_connection(j2, bridge1);
+        embedding.add_connection(bridge1, j3);
+        embedding.add_connection(bridge0, bridge1); // bridge
+        embedding.add_connection(test0, test1); // should cause 2 intersections
+
+        assert_eq!(
+            embedding
+                .junctions()
+                .borrow()
+                .iter()
+                .map(|(_, junction)| junction.position())
+                .collect::<HashSet<_>>(),
+            vec![
+                Vector2i::new(-20, 0),
+                Vector2i::new(-20, 10),
+                Vector2i::new(-10, 10),
+                Vector2i::new(-10, -10),
+                Vector2i::new(20, 0),
+                Vector2i::new(20, 10),
+                Vector2i::new(10, 10),
+                Vector2i::new(10, -10),
+                Vector2i::new(-10, 0),
+                Vector2i::new(10, 0),
+            ]
+            .into_iter()
+            .collect::<HashSet<_>>()
+        );
+        assert_eq!(
+            embedding.lines().iter().collect::<HashSet<_>>(),
+            vec![
+                vec![Vector2i::new(-20, 0), Vector2i::new(-20, 10)],
+                vec![Vector2i::new(-20, 10), Vector2i::new(-10, 10)],
+                vec![Vector2i::new(-10, 10), Vector2i::new(-10, 0)],
+                vec![Vector2i::new(-10, -10), Vector2i::new(-10, 0)],
+                vec![Vector2i::new(20, 0), Vector2i::new(20, 10)],
+                vec![Vector2i::new(20, 10), Vector2i::new(10, 10)],
+                vec![Vector2i::new(10, 10), Vector2i::new(10, 0)],
+                vec![Vector2i::new(10, -10), Vector2i::new(10, 0)],
+                vec![Vector2i::new(-10, 10), Vector2i::new(10, 10)],
+                vec![Vector2i::new(-20, 0), Vector2i::new(-10, 0)],
+                vec![Vector2i::new(-10, 0), Vector2i::new(10, 0)],
+                vec![Vector2i::new(20, 0), Vector2i::new(10, 0)],
+            ]
+            .iter()
+            .collect::<HashSet<_>>()
+        );
+    }
+
+    #[test]
+    fn intersection_created_when_voltage_connects() {
+        // this is the same as perpendicular_intersection(), but the
+        // voltage connection is added last
+        let mut embedding: Embedding = Default::default();
+        let j0 = embedding.add_junction(Vector2i::new(10, 0)); // no origin!
+        let j1 = embedding.add_junction(Vector2i::new(0, 10));
+        let j2 = embedding.add_junction(Vector2i::new(-10, 0));
+        let j3 = embedding.add_junction(Vector2i::new(0, -10));
+        embedding.add_connection(j0, j2);
+        embedding.add_connection(j1, j3);
+        embedding.add_connection(j0, j1);
+
+        assert_eq!(
+            embedding
+                .junctions()
+                .borrow()
+                .iter()
+                .map(|(_, junction)| junction.position())
+                .collect::<HashSet<_>>(),
+            vec![
+                Vector2i::new(10, 0),
+                Vector2i::new(0, 10),
+                Vector2i::new(-10, 0),
+                Vector2i::new(0, -10),
+                Vector2i::new(0, 0), // origin!
+            ]
+            .into_iter()
+            .collect::<HashSet<_>>()
+        );
+        assert_eq!(
+            embedding.lines().iter().collect::<HashSet<_>>(),
+            vec![
+                vec![
+                    Vector2i::new(10, 0),
+                    Vector2i::new(10, 10),
+                    Vector2i::new(0, 10)
+                ],
+                vec![Vector2i::new(10, 0), Vector2i::new(0, 0)],
+                vec![Vector2i::new(0, 10), Vector2i::new(0, 0)],
+                vec![Vector2i::new(-10, 0), Vector2i::new(0, 0)],
+                vec![Vector2i::new(0, -10), Vector2i::new(0, 0)]
             ]
             .iter()
             .collect::<HashSet<_>>()
